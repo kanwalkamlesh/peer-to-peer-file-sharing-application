@@ -236,7 +236,7 @@ class NetworkManager:
                 raise
 
             # Step 2: Wait for handshake_ack
-            sock.settimeout(3)
+            sock.settimeout(5)
             try:
                 ack = sock.recv(4096).decode('utf-8')
                 if self.callback:
@@ -291,7 +291,13 @@ class NetworkManager:
                                 if self.callback:
                                     self.callback(f"[DIAG] Final response JSON decode failed: {str(e)}")
                                 raise
-                            # ...existing code...
+                            if self.callback:
+                                self.callback(f"Successfully connected to peer: {peer_name} ({peer_ip}:{peer_port})")
+                            return True
+                        else:
+                            # Empty response means peer closed connection after sending ack
+                            if self.callback:
+                                self.callback(f"Successfully connected to peer: {peer_name} ({peer_ip}:{peer_port})")
                             return True
         except socket.timeout:
             if self.callback:
