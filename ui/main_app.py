@@ -28,7 +28,7 @@ class P2PFileShareApp:
         self.network_manager = NetworkManager(callback=self.log_message)
         
         # Variables
-        self.peer_name_var = tk.StringVar(value=f"Peer-{NetworkManager.get_peer_id()}")
+        self.peer_name_var = tk.StringVar(value=f"Peer-{self.network_manager.peer_id}")
         self.is_running = False
         
         # Setup UI
@@ -270,7 +270,7 @@ def main():
     
     # Initial log messages
     app.log_message("P2P File Sharing Application Started")
-    app.log_message(f"Your Peer ID: {NetworkManager.get_peer_id()}")
+    app.log_message(f"Your Peer ID: {app.network_manager.peer_id}")
     app.refresh_files()
     
     root.mainloop()

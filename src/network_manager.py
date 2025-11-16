@@ -16,6 +16,7 @@ class NetworkManager:
         self.host = host
         self.port = port
         self.socket = None
+        self.peer_id = self._generate_peer_id()  # Generate once at startup
         self.peers: Dict[str, Dict] = {}  # {peer_id: {ip, port, name}}
         self.callback = callback  # Callback for UI updates
         self.running = False
@@ -93,13 +94,16 @@ class NetworkManager:
                     self.callback(f"Peer connected: {peer_name} ({addr[0]})")
                 
                 # Send acknowledgment
-                response = {'status': 'connected', 'peer_id': peer_id}
+                response = {'status': 'connected', 'peer_id': self.peer_id}
                 client_socket.sendall(json.dumps(response).encode('utf-8'))
         except Exception as e:
             if self.callback:
                 self.callback(f"Error handling peer connection: {str(e)}")
         finally:
-            client_socket.close()
+            try:
+                client_socket.close()
+            except:
+                pass
     
     def _discover_peers(self):
         """Discover peers on the LAN using UDP broadcast"""
@@ -108,32 +112,35 @@ class NetworkManager:
                 # Get local IP
                 local_ip = self.get_local_ip()
                 
-                # Send discovery broadcast
+                # Create socket for broadcasting
                 broadcast_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 broadcast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 broadcast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
                 broadcast_socket.settimeout(2)
                 
+                # Bind to listen for responses
+                broadcast_socket.bind(('', 5001))
+                
                 message = {
                     'type': 'discovery',
-                    'peer_id': self.get_peer_id(),
+                    'peer_id': self.peer_id,
                     'ip': local_ip,
                     'port': self.port
                 }
                 
+                # Send discovery broadcast
                 broadcast_socket.sendto(
                     json.dumps(message).encode('utf-8'),
                     ('<broadcast>', 5001)
                 )
                 
                 # Listen for discovery responses
-                broadcast_socket.bind(('', 5001))
                 try:
                     data, addr = broadcast_socket.recvfrom(4096)
                     peer_data = json.loads(data.decode('utf-8'))
                     if peer_data.get('type') == 'discovery_response':
                         peer_id = peer_data.get('peer_id')
-                        if peer_id != self.get_peer_id():
+                        if peer_id != self.peer_id:  # Don't add ourselves
                             self.peers[peer_id] = {
                                 'ip': addr[0],
                                 'port': peer_data.get('port'),
@@ -146,30 +153,53 @@ class NetworkManager:
                 
                 time.sleep(3)  # Discovery interval
             except Exception as e:
-                pass
+                if self.callback:
+                    self.callback(f"Discovery error: {str(e)}")
+                time.sleep(3)
     
     def connect_to_peer(self, peer_ip: str, peer_port: int, peer_name: str = "Unknown") -> bool:
         """Connect to a specific peer"""
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)  # 5 second timeout
             sock.connect((peer_ip, peer_port))
             
             # Send peer info
             peer_info = {
-                'peer_id': self.get_peer_id(),
+                'peer_id': self.peer_id,
                 'name': peer_name,
                 'port': self.port
             }
             sock.sendall(json.dumps(peer_info).encode('utf-8'))
             
-            # Wait for response
+            # Wait for response with timeout
+            sock.settimeout(3)
             response = sock.recv(4096).decode('utf-8')
             if response:
+                # Store the peer
+                self.peers[self.peer_id] = {
+                    'ip': peer_ip,
+                    'port': peer_port,
+                    'name': peer_name
+                }
+                if self.callback:
+                    self.callback(f"Connected to peer: {peer_name} ({peer_ip}:{peer_port})")
                 sock.close()
                 return True
+        except socket.timeout:
+            if self.callback:
+                self.callback(f"Connection timeout: Peer {peer_ip}:{peer_port} not responding")
+        except ConnectionRefusedError:
+            if self.callback:
+                self.callback(f"Connection refused: Peer {peer_ip}:{peer_port} is offline")
         except Exception as e:
             if self.callback:
                 self.callback(f"Failed to connect to peer: {str(e)}")
+        finally:
+            try:
+                sock.close()
+            except:
+                pass
         return False
     
     def get_peers(self) -> List[Dict]:
@@ -259,7 +289,13 @@ class NetworkManager:
             return "127.0.0.1"
     
     @staticmethod
+    def _generate_peer_id() -> str:
+        """Generate a unique peer ID once at startup"""
+        import uuid
+        return str(uuid.uuid4())[:8]
+    
+    @staticmethod
     def get_peer_id() -> str:
-        """Generate a unique peer ID"""
+        """Get a new peer ID (for backward compatibility)"""
         import uuid
         return str(uuid.uuid4())[:8]
