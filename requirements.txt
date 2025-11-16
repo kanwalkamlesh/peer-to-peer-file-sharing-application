@@ -1,0 +1,8 @@
+# P2P File Sharing Application Requirements
+# No external dependencies - uses Python standard library only
+
+# Python 3.6+ is required
+# tkinter comes with Python by default
+
+# Optional (for enhanced functionality):
+# psutil>=5.8.0  # For system monitoring
