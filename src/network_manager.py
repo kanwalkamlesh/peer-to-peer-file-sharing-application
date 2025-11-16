@@ -77,25 +77,32 @@ class NetworkManager:
     def _handle_peer_connection(self, client_socket, addr):
         """Handle incoming connection from a peer"""
         try:
-            # Receive peer info
+            # Step 1: Handshake receive
             data = client_socket.recv(4096).decode('utf-8')
             if data:
-                peer_info = json.loads(data)
-                peer_id = peer_info.get('peer_id')
-                peer_name = peer_info.get('name', 'Unknown')
-                
-                self.peers[peer_id] = {
-                    'ip': addr[0],
-                    'port': peer_info.get('port', addr[1]),
-                    'name': peer_name
-                }
-                
-                if self.callback:
-                    self.callback(f"Peer connected: {peer_name} ({addr[0]})")
-                
-                # Send acknowledgment
-                response = {'status': 'connected', 'peer_id': self.peer_id}
-                client_socket.sendall(json.dumps(response).encode('utf-8'))
+                handshake = json.loads(data)
+                if handshake.get('type') == 'handshake':
+                    peer_id = handshake.get('peer_id')
+                    peer_name = handshake.get('name', 'Unknown')
+                    self.peers[peer_id] = {
+                        'ip': addr[0],
+                        'port': handshake.get('port', addr[1]),
+                        'name': peer_name
+                    }
+                    if self.callback:
+                        self.callback(f"Handshake received from: {peer_name} ({addr[0]})")
+                    # Step 2: Send handshake_ack
+                    ack = {'type': 'handshake_ack', 'peer_id': self.peer_id}
+                    client_socket.sendall(json.dumps(ack).encode('utf-8'))
+                    # Step 3: Proceed with normal peer info exchange (optional)
+                    # Receive peer info (legacy)
+                    data2 = client_socket.recv(4096).decode('utf-8')
+                    if data2:
+                        peer_info = json.loads(data2)
+                        # ...existing code...
+                        # Send acknowledgment
+                        response = {'status': 'connected', 'peer_id': self.peer_id}
+                        client_socket.sendall(json.dumps(response).encode('utf-8'))
         except Exception as e:
             if self.callback:
                 self.callback(f"Error handling peer connection: {str(e)}")
@@ -164,30 +171,43 @@ class NetworkManager:
             sock.settimeout(5)  # 5 second timeout
             sock.connect((peer_ip, peer_port))
 
-            # Send our peer info
-            peer_info = {
+            # Step 1: Send handshake
+            handshake = {
+                'type': 'handshake',
                 'peer_id': self.peer_id,
                 'name': peer_name,
                 'port': self.port
             }
-            sock.sendall(json.dumps(peer_info).encode('utf-8'))
+            sock.sendall(json.dumps(handshake).encode('utf-8'))
 
-            # Wait for response with timeout
+            # Step 2: Wait for handshake_ack
             sock.settimeout(3)
-            response = sock.recv(4096).decode('utf-8')
-            if response:
-                response_data = json.loads(response)
-                remote_peer_id = response_data.get('peer_id', None)
-                if remote_peer_id:
-                    # Store the connected peer using their peer_id
-                    self.peers[remote_peer_id] = {
-                        'ip': peer_ip,
-                        'port': peer_port,
-                        'name': peer_name
-                    }
-                    if self.callback:
-                        self.callback(f"Connected to peer: {peer_name} ({peer_ip}:{peer_port})")
-                    return True
+            ack = sock.recv(4096).decode('utf-8')
+            if ack:
+                ack_data = json.loads(ack)
+                if ack_data.get('type') == 'handshake_ack':
+                    remote_peer_id = ack_data.get('peer_id', None)
+                    if remote_peer_id:
+                        self.peers[remote_peer_id] = {
+                            'ip': peer_ip,
+                            'port': peer_port,
+                            'name': peer_name
+                        }
+                        if self.callback:
+                            self.callback(f"Handshake completed with peer: {peer_name} ({peer_ip}:{peer_port})")
+                        # Step 3: Proceed with normal peer info exchange (optional)
+                        peer_info = {
+                            'peer_id': self.peer_id,
+                            'name': peer_name,
+                            'port': self.port
+                        }
+                        sock.sendall(json.dumps(peer_info).encode('utf-8'))
+                        # Wait for response
+                        response = sock.recv(4096).decode('utf-8')
+                        if response:
+                            response_data = json.loads(response)
+                            # ...existing code...
+                            return True
         except socket.timeout:
             if self.callback:
                 self.callback(f"Connection timeout: Peer {peer_ip}:{peer_port} not responding")
