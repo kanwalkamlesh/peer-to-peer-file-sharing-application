@@ -77,10 +77,24 @@ class NetworkManager:
     def _handle_peer_connection(self, client_socket, addr):
         """Handle incoming connection from a peer"""
         try:
+            if self.callback:
+                self.callback(f"[DIAG] Incoming connection from {addr[0]}:{addr[1]}")
             # Step 1: Handshake receive
-            data = client_socket.recv(4096).decode('utf-8')
+            try:
+                data = client_socket.recv(4096).decode('utf-8')
+                if self.callback:
+                    self.callback(f"[DIAG] Handshake received: {data}")
+            except Exception as e:
+                if self.callback:
+                    self.callback(f"[DIAG] Handshake receive failed: {str(e)}")
+                raise
             if data:
-                handshake = json.loads(data)
+                try:
+                    handshake = json.loads(data)
+                except Exception as e:
+                    if self.callback:
+                        self.callback(f"[DIAG] Handshake JSON decode failed: {str(e)}")
+                    raise
                 if handshake.get('type') == 'handshake':
                     peer_id = handshake.get('peer_id')
                     peer_name = handshake.get('name', 'Unknown')
@@ -93,18 +107,43 @@ class NetworkManager:
                         self.callback(f"Handshake received from: {peer_name} ({addr[0]})")
                     # Step 2: Send handshake_ack
                     ack = {'type': 'handshake_ack', 'peer_id': self.peer_id}
-                    client_socket.sendall(json.dumps(ack).encode('utf-8'))
+                    try:
+                        client_socket.sendall(json.dumps(ack).encode('utf-8'))
+                        if self.callback:
+                            self.callback(f"[DIAG] Handshake ack sent to {addr[0]}:{addr[1]}")
+                    except Exception as e:
+                        if self.callback:
+                            self.callback(f"[DIAG] Handshake ack send failed: {str(e)}")
+                        raise
                     # Step 3: Proceed with normal peer info exchange (optional)
-                    # Receive peer info (legacy)
-                    data2 = client_socket.recv(4096).decode('utf-8')
+                    try:
+                        data2 = client_socket.recv(4096).decode('utf-8')
+                        if self.callback:
+                            self.callback(f"[DIAG] Peer info received: {data2}")
+                    except Exception as e:
+                        if self.callback:
+                            self.callback(f"[DIAG] Peer info receive failed: {str(e)}")
+                        raise
                     if data2:
-                        peer_info = json.loads(data2)
-                        # ...existing code...
+                        try:
+                            peer_info = json.loads(data2)
+                        except Exception as e:
+                            if self.callback:
+                                self.callback(f"[DIAG] Peer info JSON decode failed: {str(e)}")
+                            raise
                         # Send acknowledgment
                         response = {'status': 'connected', 'peer_id': self.peer_id}
-                        client_socket.sendall(json.dumps(response).encode('utf-8'))
+                        try:
+                            client_socket.sendall(json.dumps(response).encode('utf-8'))
+                            if self.callback:
+                                self.callback(f"[DIAG] Final acknowledgment sent to {addr[0]}:{addr[1]}")
+                        except Exception as e:
+                            if self.callback:
+                                self.callback(f"[DIAG] Final acknowledgment send failed: {str(e)}")
+                            raise
         except Exception as e:
             if self.callback:
+                self.callback(f"[DIAG] Exception in peer handler: {str(e)}")
                 self.callback(f"Error handling peer connection: {str(e)}")
         finally:
             try:
@@ -170,10 +209,15 @@ class NetworkManager:
             if self.callback:
                 self.callback(f"[DIAG] Attempting to connect to {peer_ip}:{peer_port}")
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(5)  # 5 second timeout
-            sock.connect((peer_ip, peer_port))
-            if self.callback:
-                self.callback(f"[DIAG] TCP connection established to {peer_ip}:{peer_port}")
+            sock.settimeout(5)
+            try:
+                sock.connect((peer_ip, peer_port))
+                if self.callback:
+                    self.callback(f"[DIAG] TCP connection established to {peer_ip}:{peer_port}")
+            except Exception as e:
+                if self.callback:
+                    self.callback(f"[DIAG] TCP connect failed: {str(e)}")
+                raise
 
             # Step 1: Send handshake
             handshake = {
@@ -182,17 +226,32 @@ class NetworkManager:
                 'name': peer_name,
                 'port': self.port
             }
-            sock.sendall(json.dumps(handshake).encode('utf-8'))
-            if self.callback:
-                self.callback(f"[DIAG] Handshake sent to {peer_ip}:{peer_port}")
+            try:
+                sock.sendall(json.dumps(handshake).encode('utf-8'))
+                if self.callback:
+                    self.callback(f"[DIAG] Handshake sent to {peer_ip}:{peer_port}")
+            except Exception as e:
+                if self.callback:
+                    self.callback(f"[DIAG] Handshake send failed: {str(e)}")
+                raise
 
             # Step 2: Wait for handshake_ack
             sock.settimeout(3)
-            ack = sock.recv(4096).decode('utf-8')
-            if self.callback:
-                self.callback(f"[DIAG] Handshake ack received: {ack}")
+            try:
+                ack = sock.recv(4096).decode('utf-8')
+                if self.callback:
+                    self.callback(f"[DIAG] Handshake ack received: {ack}")
+            except Exception as e:
+                if self.callback:
+                    self.callback(f"[DIAG] Handshake ack receive failed: {str(e)}")
+                raise
             if ack:
-                ack_data = json.loads(ack)
+                try:
+                    ack_data = json.loads(ack)
+                except Exception as e:
+                    if self.callback:
+                        self.callback(f"[DIAG] Handshake ack JSON decode failed: {str(e)}")
+                    raise
                 if ack_data.get('type') == 'handshake_ack':
                     remote_peer_id = ack_data.get('peer_id', None)
                     if remote_peer_id:
@@ -209,13 +268,29 @@ class NetworkManager:
                             'name': peer_name,
                             'port': self.port
                         }
-                        sock.sendall(json.dumps(peer_info).encode('utf-8'))
-                        # Wait for response
-                        response = sock.recv(4096).decode('utf-8')
-                        if self.callback:
-                            self.callback(f"[DIAG] Final response received: {response}")
+                        try:
+                            sock.sendall(json.dumps(peer_info).encode('utf-8'))
+                            if self.callback:
+                                self.callback(f"[DIAG] Final peer info sent to {peer_ip}:{peer_port}")
+                        except Exception as e:
+                            if self.callback:
+                                self.callback(f"[DIAG] Final peer info send failed: {str(e)}")
+                            raise
+                        try:
+                            response = sock.recv(4096).decode('utf-8')
+                            if self.callback:
+                                self.callback(f"[DIAG] Final response received: {response}")
+                        except Exception as e:
+                            if self.callback:
+                                self.callback(f"[DIAG] Final response receive failed: {str(e)}")
+                            raise
                         if response:
-                            response_data = json.loads(response)
+                            try:
+                                response_data = json.loads(response)
+                            except Exception as e:
+                                if self.callback:
+                                    self.callback(f"[DIAG] Final response JSON decode failed: {str(e)}")
+                                raise
                             # ...existing code...
                             return True
         except socket.timeout:
@@ -265,58 +340,12 @@ class NetworkManager:
                 with open(file_path, 'rb') as f:
                     while True:
                         chunk = f.read(4096)
-                        try:
-                            if self.callback:
-                                self.callback(f"[DIAG] Incoming connection from {addr[0]}:{addr[1]}")
-                            # Step 1: Handshake receive
-                            data = client_socket.recv(4096).decode('utf-8')
-                            if self.callback:
-                                self.callback(f"[DIAG] Handshake received: {data}")
-                            if data:
-                                handshake = json.loads(data)
-                                if handshake.get('type') == 'handshake':
-                                    peer_id = handshake.get('peer_id')
-                                    peer_name = handshake.get('name', 'Unknown')
-                                    self.peers[peer_id] = {
-                                        'ip': addr[0],
-                                        'port': handshake.get('port', addr[1]),
-                                        'name': peer_name
-                                    }
-                                    if self.callback:
-                                        self.callback(f"Handshake received from: {peer_name} ({addr[0]})")
-                                    # Step 2: Send handshake_ack
-                                    ack = {'type': 'handshake_ack', 'peer_id': self.peer_id}
-                                    client_socket.sendall(json.dumps(ack).encode('utf-8'))
-                                    if self.callback:
-                                        self.callback(f"[DIAG] Handshake ack sent to {addr[0]}:{addr[1]}")
-                                    # Step 3: Proceed with normal peer info exchange (optional)
-                                    # Receive peer info (legacy)
-                                    data2 = client_socket.recv(4096).decode('utf-8')
-                                    if self.callback:
-                                        self.callback(f"[DIAG] Peer info received: {data2}")
-                                    if data2:
-                                        peer_info = json.loads(data2)
-                                        # Send acknowledgment
-                                        response = {'status': 'connected', 'peer_id': self.peer_id}
-                                        client_socket.sendall(json.dumps(response).encode('utf-8'))
-                                        if self.callback:
-                                            self.callback(f"[DIAG] Final acknowledgment sent to {addr[0]}:{addr[1]}")
-                        except Exception as e:
-                            if self.callback:
-                                self.callback(f"[DIAG] Exception in peer handler: {str(e)}")
-                                self.callback(f"Error handling peer connection: {str(e)}")
-                        finally:
-                            try:
-                                client_socket.close()
-                            except:
-                                pass
                     f.write(chunk)
                     bytes_received += len(chunk)
             
             if self.callback:
                 self.callback(f"File received: {file_name}")
             
-            client_socket.close()
         except Exception as e:
             if self.callback:
                 self.callback(f"Error receiving file: {str(e)}")
