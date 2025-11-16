@@ -167,9 +167,13 @@ class NetworkManager:
     def connect_to_peer(self, peer_ip: str, peer_port: int, peer_name: str = "Unknown") -> bool:
         """Connect to a specific peer"""
         try:
+            if self.callback:
+                self.callback(f"[DIAG] Attempting to connect to {peer_ip}:{peer_port}")
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(5)  # 5 second timeout
             sock.connect((peer_ip, peer_port))
+            if self.callback:
+                self.callback(f"[DIAG] TCP connection established to {peer_ip}:{peer_port}")
 
             # Step 1: Send handshake
             handshake = {
@@ -179,10 +183,14 @@ class NetworkManager:
                 'port': self.port
             }
             sock.sendall(json.dumps(handshake).encode('utf-8'))
+            if self.callback:
+                self.callback(f"[DIAG] Handshake sent to {peer_ip}:{peer_port}")
 
             # Step 2: Wait for handshake_ack
             sock.settimeout(3)
             ack = sock.recv(4096).decode('utf-8')
+            if self.callback:
+                self.callback(f"[DIAG] Handshake ack received: {ack}")
             if ack:
                 ack_data = json.loads(ack)
                 if ack_data.get('type') == 'handshake_ack':
@@ -204,18 +212,23 @@ class NetworkManager:
                         sock.sendall(json.dumps(peer_info).encode('utf-8'))
                         # Wait for response
                         response = sock.recv(4096).decode('utf-8')
+                        if self.callback:
+                            self.callback(f"[DIAG] Final response received: {response}")
                         if response:
                             response_data = json.loads(response)
                             # ...existing code...
                             return True
         except socket.timeout:
             if self.callback:
+                self.callback(f"[DIAG] Connection timeout at {peer_ip}:{peer_port}")
                 self.callback(f"Connection timeout: Peer {peer_ip}:{peer_port} not responding")
         except ConnectionRefusedError:
             if self.callback:
+                self.callback(f"[DIAG] Connection refused at {peer_ip}:{peer_port}")
                 self.callback(f"Connection refused: Peer {peer_ip}:{peer_port} is offline")
         except Exception as e:
             if self.callback:
+                self.callback(f"[DIAG] Exception: {str(e)}")
                 self.callback(f"Failed to connect to peer: {str(e)}")
         finally:
             try:
@@ -252,41 +265,51 @@ class NetworkManager:
                 with open(file_path, 'rb') as f:
                     while True:
                         chunk = f.read(4096)
-                        if not chunk:
-                            break
-                        sock.sendall(chunk)
-                
-                if self.callback:
-                    self.callback(f"File sent: {file_name} to {peer_ip}")
-                sock.close()
-                return True
-        except Exception as e:
-            if self.callback:
-                self.callback(f"Error sending file: {str(e)}")
-        return False
-    
-    def receive_file(self, client_socket, download_path: str):
-        """Receive a file from a peer"""
-        try:
-            # Receive transfer request
-            data = client_socket.recv(4096).decode('utf-8')
-            transfer_request = json.loads(data)
-            
-            file_name = transfer_request.get('file_name')
-            file_size = transfer_request.get('file_size')
-            
-            # Send acceptance
-            client_socket.sendall(b'accepted')
-            
-            # Receive file in chunks
-            file_path = os.path.join(download_path, file_name)
-            bytes_received = 0
-            
-            with open(file_path, 'wb') as f:
-                while bytes_received < file_size:
-                    chunk = client_socket.recv(4096)
-                    if not chunk:
-                        break
+                        try:
+                            if self.callback:
+                                self.callback(f"[DIAG] Incoming connection from {addr[0]}:{addr[1]}")
+                            # Step 1: Handshake receive
+                            data = client_socket.recv(4096).decode('utf-8')
+                            if self.callback:
+                                self.callback(f"[DIAG] Handshake received: {data}")
+                            if data:
+                                handshake = json.loads(data)
+                                if handshake.get('type') == 'handshake':
+                                    peer_id = handshake.get('peer_id')
+                                    peer_name = handshake.get('name', 'Unknown')
+                                    self.peers[peer_id] = {
+                                        'ip': addr[0],
+                                        'port': handshake.get('port', addr[1]),
+                                        'name': peer_name
+                                    }
+                                    if self.callback:
+                                        self.callback(f"Handshake received from: {peer_name} ({addr[0]})")
+                                    # Step 2: Send handshake_ack
+                                    ack = {'type': 'handshake_ack', 'peer_id': self.peer_id}
+                                    client_socket.sendall(json.dumps(ack).encode('utf-8'))
+                                    if self.callback:
+                                        self.callback(f"[DIAG] Handshake ack sent to {addr[0]}:{addr[1]}")
+                                    # Step 3: Proceed with normal peer info exchange (optional)
+                                    # Receive peer info (legacy)
+                                    data2 = client_socket.recv(4096).decode('utf-8')
+                                    if self.callback:
+                                        self.callback(f"[DIAG] Peer info received: {data2}")
+                                    if data2:
+                                        peer_info = json.loads(data2)
+                                        # Send acknowledgment
+                                        response = {'status': 'connected', 'peer_id': self.peer_id}
+                                        client_socket.sendall(json.dumps(response).encode('utf-8'))
+                                        if self.callback:
+                                            self.callback(f"[DIAG] Final acknowledgment sent to {addr[0]}:{addr[1]}")
+                        except Exception as e:
+                            if self.callback:
+                                self.callback(f"[DIAG] Exception in peer handler: {str(e)}")
+                                self.callback(f"Error handling peer connection: {str(e)}")
+                        finally:
+                            try:
+                                client_socket.close()
+                            except:
+                                pass
                     f.write(chunk)
                     bytes_received += len(chunk)
             
