@@ -163,29 +163,31 @@ class NetworkManager:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(5)  # 5 second timeout
             sock.connect((peer_ip, peer_port))
-            
-            # Send peer info
+
+            # Send our peer info
             peer_info = {
                 'peer_id': self.peer_id,
                 'name': peer_name,
                 'port': self.port
             }
             sock.sendall(json.dumps(peer_info).encode('utf-8'))
-            
+
             # Wait for response with timeout
             sock.settimeout(3)
             response = sock.recv(4096).decode('utf-8')
             if response:
-                # Store the peer
-                self.peers[self.peer_id] = {
-                    'ip': peer_ip,
-                    'port': peer_port,
-                    'name': peer_name
-                }
-                if self.callback:
-                    self.callback(f"Connected to peer: {peer_name} ({peer_ip}:{peer_port})")
-                sock.close()
-                return True
+                response_data = json.loads(response)
+                remote_peer_id = response_data.get('peer_id', None)
+                if remote_peer_id:
+                    # Store the connected peer using their peer_id
+                    self.peers[remote_peer_id] = {
+                        'ip': peer_ip,
+                        'port': peer_port,
+                        'name': peer_name
+                    }
+                    if self.callback:
+                        self.callback(f"Connected to peer: {peer_name} ({peer_ip}:{peer_port})")
+                    return True
         except socket.timeout:
             if self.callback:
                 self.callback(f"Connection timeout: Peer {peer_ip}:{peer_port} not responding")
